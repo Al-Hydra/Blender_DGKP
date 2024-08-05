@@ -76,42 +76,50 @@ class DGKP_FH_IMPORT(bpy.types.FileHandler):
 def import_dgkp(filePath, materialspath):
         
     dgkp:DGKP = read_dgkp(filePath)
-    materialsDGKP: DGKP = read_dgkp(materialspath)
+    if materialspath:
+        materialsDGKP: DGKP = read_dgkp(materialspath)
+    else:
+        materialsDGKP = DGKP()
 
 
-    def add_material(mat):
+    def add_material(material, material_name):
 
         # Create a new material
-        material = bpy.data.materials.get(mat.name)
-        if not material:
-            material = bpy.data.materials.new(mat.name)
-            material.use_nodes = True
-            nodes = material.node_tree.nodes
-            nodes.clear()
+        if material:
+            blender_material = bpy.data.materials.get(material.name)
+            if not blender_material:
+                blender_material = bpy.data.materials.new(material.name)
+                blender_material.use_nodes = True
+                nodes = blender_material.node_tree.nodes
+                nodes.clear()
 
-            # Create Image Texture Node
-            image_texture_node = nodes.new(type='ShaderNodeTexImage')
-            image_texture_node.image = bpy.data.images.get(mat.textures[0])
-            image_texture_node.location = (-400, 0)
+                # Create Image Texture Node
+                image_texture_node = nodes.new(type='ShaderNodeTexImage')
+                image_texture_node.image = bpy.data.images.get(material.textures[0])
+                image_texture_node.location = (-400, 0)
 
-            # Create Color Mix Node (set to Multiply)
-            color_mix_node = nodes.new(type='ShaderNodeMixRGB')
-            color_mix_node.blend_type = 'MULTIPLY'
-            color_mix_node.inputs['Fac'].default_value = 1.0
-            color_mix_node.location = (-200, 0)
+                # Create Color Mix Node (set to Multiply)
+                color_mix_node = nodes.new(type='ShaderNodeMixRGB')
+                color_mix_node.blend_type = 'MULTIPLY'
+                color_mix_node.inputs['Fac'].default_value = 1.0
+                color_mix_node.location = (-200, 0)
 
-            # Create Material Output Node
-            output_node = nodes.new(type='ShaderNodeOutputMaterial')
-            output_node.location = (200, 0)
+                # Create Material Output Node
+                output_node = nodes.new(type='ShaderNodeOutputMaterial')
+                output_node.location = (200, 0)
 
-            # Connect Image Texture Node output to Color Mix Node inputs
-            material.node_tree.links.new(image_texture_node.outputs['Color'], color_mix_node.inputs['Color1'])
-            material.node_tree.links.new(image_texture_node.outputs['Alpha'], color_mix_node.inputs['Color2'])
+                # Connect Image Texture Node output to Color Mix Node inputs
+                blender_material.node_tree.links.new(image_texture_node.outputs['Color'], color_mix_node.inputs['Color1'])
+                blender_material.node_tree.links.new(image_texture_node.outputs['Alpha'], color_mix_node.inputs['Color2'])
 
-            # Connect Color Mix Node output to Material Output Node
-            material.node_tree.links.new(color_mix_node.outputs['Color'], output_node.inputs['Surface'])
+                # Connect Color Mix Node output to Material Output Node
+                blender_material.node_tree.links.new(color_mix_node.outputs['Color'], output_node.inputs['Surface'])
+            
+           
+        else:
+            blender_material = bpy.data.materials.new(material_name)
         
-        return material
+        return blender_material
         
 
 
@@ -127,8 +135,6 @@ def import_dgkp(filePath, materialspath):
         bbone["rotation"] = rotation
         bbone["scale"] = bone.scale
         bbone["matrix"] = matrix
-        
-        
         
         bbone.matrix = matrix
         
@@ -214,7 +220,7 @@ def import_dgkp(filePath, materialspath):
                 mat: MDLD_MaterialMesh
                 material = materialsDGKP.materials.get(mat.name)
 
-                meshdata.materials.append(add_material(material))
+                meshdata.materials.append(add_material(material, mat.name))
 
                 for tris in mat.triangles:
                     face = bm.faces.new((bm.verts[tris[0]], bm.verts[tris[1]], bm.verts[tris[2]]))

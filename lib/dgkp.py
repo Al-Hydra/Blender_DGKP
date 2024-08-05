@@ -3,7 +3,11 @@ from .PyBinaryReader.binary_reader import *
 
 class DGKP(BrStruct):
     def __init__(self) -> None:
-        super().__init__()
+        self.textures = []
+        self.models = []
+        self.animations = []
+        self.materials = {}
+        self.allFiles = {}
     def __br_read__(self, br: BinaryReader, *args):
         
         self.magic = br.read_str(4)
@@ -49,7 +53,7 @@ class DGKP(BrStruct):
                 self.materials[file.name] =  file
 
             else:
-                file = DGKPFile(fileName, fileType, fileData)
+                file = DGKPFile(fileName, fileType)
             
             file.data = fileData
             self.allFiles[fileName] = file
@@ -94,8 +98,7 @@ class DGKP(BrStruct):
                 br.write_uint32(0) #offset
                 br.write_str_fixed(name, 128)
 
-                file_bytes = bytes(file.data)
-
+                file_bytes = bytes(file_buf.buffer())
 
             else:
                 br.write_str(file.type)
@@ -172,7 +175,7 @@ class MDLD(BrStruct):
         vertexBufferSize = br.read_uint32()
         self.vertexCount = br.read_uint32()
         self.vertexFlags = br.read_uint16()
-        self.vertexUnk = br.read_uint16()
+        self.vertexType = br.read_uint16()
         self.skeletonName = br.read_str(64)
         self.shaderString = br.read_str(128)
         self.boundingBoxData = br.read_bytes(64)
@@ -184,7 +187,7 @@ class MDLD(BrStruct):
         self.bones = br.read_struct(MDLD_Bone, self.bonesCount)
 
         br.seek(vertexBufferOffset)
-        self.vertices = br.read_struct(MDLD_Vertex, self.vertexCount)
+        self.vertices = br.read_struct(MDLD_Vertex, self.vertexCount, self.vertexFlags, self.vertexType)
     
     
     def __br_write__(self, br: BinaryReader):
@@ -266,7 +269,10 @@ class MDLD_MaterialMesh(BrStruct):
         pos = br.pos()
 
         br.seek(trianglesOffset)
-        self.triangles = [br.read_uint32(3) for i in range(self.triangleIndicesCount//3)]
+        if self.type == 2:
+            self.triangles = [br.read_uint16(3) for i in range(self.triangleIndicesCount//3)]
+        elif self.type == 4:
+            self.triangles = [br.read_uint32(3) for i in range(self.triangleIndicesCount//3)]
 
         br.seek(pos)
     
@@ -314,17 +320,20 @@ class MDLD_Vertex(BrStruct):
         self.boneIDs = [0,0,0,0]  
         self.weights = [0,0,0,0]  
         
-    def __br_read__(self, br: BinaryReader):
+    def __br_read__(self, br: BinaryReader, vertexFlags, vertexType):
         self.position = br.read_float(3)
         self.color = br.read_uint8(4)
         self.normal = br.read_half_float(3)
         br.align_pos(4)
         self.uv = br.read_half_float(2)
-        self.tangent = br.read_half_float(3)
-        br.align_pos(4)
 
-        self.boneIDs = br.read_uint16(4)
-        self.weights = br.read_float(4)
+        if vertexFlags & 32:
+            self.tangent = br.read_half_float(3)
+            br.align_pos(4)
+
+        if vertexType & 2:
+            self.boneIDs = br.read_uint16(4)
+            self.weights = br.read_float(4)
     
     def __br_write__(self, br: BinaryReader):
         br.write_float(self.position)

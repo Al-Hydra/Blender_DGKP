@@ -1,0 +1,8 @@
+
+*.pyc
+*.pyc
+dgkp_test.py
+dgkp_texture_dumper.py
+/test
+lib/__pycache__/dgkp.cpython-311.pyc
+lib/__pycache__/dgkp.cpython-312.pyc
