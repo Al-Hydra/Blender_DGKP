@@ -8,6 +8,8 @@ from math import radians, tan
 from .lib.dgkp import *
 
 
+sklpath = r"G:\SteamLibrary\steamapps\common\KILL la KILL -IF\ResourceWin\KlkResources\C011_RYU\MDL_C011_RYU - Copy - Copy.pac"
+
 class DGKP_IMPORTER_OT_IMPORT(bpy.types.Operator, ImportHelper):
     bl_label = "Import DGKP"
     bl_idname = "import_scene.dgkp"
@@ -255,6 +257,7 @@ def import_dgkp(filePath, materialspath):
 
                     fc.update()
 
+    skldgkp = read_dgkp(sklpath)
 
     for anim in dgkp.animations:
         anim: ANUM
@@ -275,6 +278,8 @@ def import_dgkp(filePath, materialspath):
             target_armature.animation_data_create()
             target_armature.animation_data.action = action
 
+            anmmodel = skldgkp.models[0]
+
             bones = sorted([b.name for b in target_armature.pose.bones])
 
             for curve in sklAnim.curves:
@@ -289,18 +294,26 @@ def import_dgkp(filePath, materialspath):
                     matrix = Matrix(bbone["matrix"])
                     
                 loc, rot, scale = matrix.decompose()
-
-                brot = matrix.to_quaternion()
                 
                 
                 data_path = f'{bone_path}.{"location"}'
                 curve.locationFrames = {f: Vector(location) - (loc) for f, location in curve.locationFrames.items()}
+                
                 insertFrames(action, group_name, data_path, curve.locationFrames, 3)
 
                 data_path = f'{bone_path}.{"rotation_quaternion"}'
-                curve.rotationFrames = {f: (rotation[3], *rotation[:3]) for f, rotation in curve.rotationFrames.items()}
 
-                insertFrames(action, group_name, data_path, curve.rotationFrames, 4)
+                #Rotations Quaternion
+                rotations = {}
+                for frame, rotation in curve.rotationFrames.items():
+                    bind_rotaion = rot.conjugated()
+                    rotation = Quaternion((rotation[3], *rotation[:3]))
+                    #rotate it with the new rotation
+                    bind_rotaion.rotate(rotation)
+                    #invert the result
+                    rotations[frame] = Quaternion(bind_rotaion)
+
+                insertFrames(action, group_name, data_path, rotations, 4)
 
                 data_path = f'{bone_path}.{"scale"}'
                 insertFrames(action, group_name, data_path, curve.scaleFrames, 3)
