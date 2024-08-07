@@ -8,8 +8,6 @@ from math import radians, tan
 from .lib.dgkp import *
 
 
-sklpath = r"G:\SteamLibrary\steamapps\common\KILL la KILL -IF\ResourceWin\KlkResources\C011_RYU\MDL_C011_RYU - Copy - Copy.pac"
-
 class DGKP_IMPORTER_OT_IMPORT(bpy.types.Operator, ImportHelper):
     bl_label = "Import DGKP"
     bl_idname = "import_scene.dgkp"
@@ -131,9 +129,10 @@ def import_dgkp(filePath, materialspath):
         bbone.tail = Vector((0, 0.1, 0))
         
         rotation = Quaternion((bone.rotation[3], bone.rotation[0], bone.rotation[1], bone.rotation[2]))
-        matrix = Matrix.LocRotScale(bone.position, rotation, bone.scale)
+        position = Vector((bone.position[0], -bone.position[2], bone.position[1]))
+        matrix = Matrix.LocRotScale(position, rotation, bone.scale)
         
-        bbone["loc"] = bone.position
+        bbone["loc"] = position
         bbone["rotation"] = rotation
         bbone["scale"] = bone.scale
         bbone["matrix"] = matrix
@@ -206,7 +205,9 @@ def import_dgkp(filePath, materialspath):
             vgroup_layer = bm.verts.layers.deform.new("Weights")
 
             for vertex in mdl.vertices:
-                vert = bm.verts.new(vertex.position)
+                vPos = Vector((vertex.position[0], -vertex.position[2], vertex.position[1]))
+                vert = bm.verts.new(vPos)
+
                 custom_normals.append(vertex.normal)
                 vert[vgroup_layer][vertex.boneIDs[0]] = 0
                 vert[vgroup_layer][vertex.boneIDs[1]] = 0
@@ -257,8 +258,6 @@ def import_dgkp(filePath, materialspath):
 
                     fc.update()
 
-    skldgkp = read_dgkp(sklpath)
-
     for anim in dgkp.animations:
         anim: ANUM
         
@@ -278,8 +277,6 @@ def import_dgkp(filePath, materialspath):
             target_armature.animation_data_create()
             target_armature.animation_data.action = action
 
-            anmmodel = skldgkp.models[0]
-
             bones = sorted([b.name for b in target_armature.pose.bones])
 
             for curve in sklAnim.curves:
@@ -288,34 +285,29 @@ def import_dgkp(filePath, materialspath):
                 bone_path = f'pose.bones["{group_name}"]'
                 
                 bbone = target_armature.data.bones.get(bones[curve.index])
-                if bbone.parent:
+                '''if bbone.parent:
                     matrix = Matrix(bbone.parent["matrix"]).inverted() @ Matrix(bbone["matrix"])
                 else:
-                    matrix = Matrix(bbone["matrix"])
+                    matrix = Matrix(bbone["matrix"])'''
+                
+                if bbone.parent:
+                    matrix = bbone.parent.matrix_local.inverted() @  bbone.matrix_local
+                else:
+                    matrix = bbone.matrix_local
                     
                 loc, rot, scale = matrix.decompose()
                 
                 
                 data_path = f'{bone_path}.{"location"}'
                 curve.locationFrames = {f: Vector(location) - (loc) for f, location in curve.locationFrames.items()}
-                
                 insertFrames(action, group_name, data_path, curve.locationFrames, 3)
 
                 data_path = f'{bone_path}.{"rotation_quaternion"}'
-
-                #Rotations Quaternion
-                rotations = {}
-                for frame, rotation in curve.rotationFrames.items():
-                    bind_rotaion = rot.conjugated()
-                    rotation = Quaternion((rotation[3], *rotation[:3]))
-                    #rotate it with the new rotation
-                    bind_rotaion.rotate(rotation)
-                    #invert the result
-                    rotations[frame] = Quaternion(bind_rotaion)
+                rotations = {frame : rot.rotation_difference(Quaternion((rotation[3], *rotation[:3]))) for frame, rotation in curve.rotationFrames.items()}
 
                 insertFrames(action, group_name, data_path, rotations, 4)
 
-                data_path = f'{bone_path}.{"scale"}'
+                data_path = f'{bone_path}.{"scale"}' 
                 insertFrames(action, group_name, data_path, curve.scaleFrames, 3)
 
         if anim.cameraAnimation:
