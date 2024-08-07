@@ -129,10 +129,9 @@ def import_dgkp(filePath, materialspath):
         bbone.tail = Vector((0, 0.1, 0))
         
         rotation = Quaternion((bone.rotation[3], bone.rotation[0], bone.rotation[1], bone.rotation[2]))
-        position = Vector((bone.position[0], -bone.position[2], bone.position[1]))
-        matrix = Matrix.LocRotScale(position, rotation, bone.scale)
+        matrix = Matrix.LocRotScale(bone.position, rotation, bone.scale)
         
-        bbone["loc"] = position
+        bbone["loc"] = bone.position
         bbone["rotation"] = rotation
         bbone["scale"] = bone.scale
         bbone["matrix"] = matrix
@@ -205,8 +204,7 @@ def import_dgkp(filePath, materialspath):
             vgroup_layer = bm.verts.layers.deform.new("Weights")
 
             for vertex in mdl.vertices:
-                vPos = Vector((vertex.position[0], -vertex.position[2], vertex.position[1]))
-                vert = bm.verts.new(vPos)
+                vert = bm.verts.new(vertex.position)
 
                 custom_normals.append(vertex.normal)
                 vert[vgroup_layer][vertex.boneIDs[0]] = 0
@@ -285,22 +283,17 @@ def import_dgkp(filePath, materialspath):
                 bone_path = f'pose.bones["{group_name}"]'
                 
                 bbone = target_armature.data.bones.get(bones[curve.index])
-                '''if bbone.parent:
+                if bbone.parent:
                     matrix = Matrix(bbone.parent["matrix"]).inverted() @ Matrix(bbone["matrix"])
                 else:
-                    matrix = Matrix(bbone["matrix"])'''
-                
-                if bbone.parent:
-                    matrix = bbone.parent.matrix_local.inverted() @  bbone.matrix_local
-                else:
-                    matrix = bbone.matrix_local
-                    
+                    matrix = Matrix(bbone["matrix"])
+
                 loc, rot, scale = matrix.decompose()
-                
-                
+
                 data_path = f'{bone_path}.{"location"}'
-                curve.locationFrames = {f: Vector(location) - (loc) for f, location in curve.locationFrames.items()}
-                insertFrames(action, group_name, data_path, curve.locationFrames, 3)
+                locations = {f: Vector((location)) - (loc) for f, location in curve.locationFrames.items()}
+
+                insertFrames(action, group_name, data_path, locations, 3)
 
                 data_path = f'{bone_path}.{"rotation_quaternion"}'
                 rotations = {frame : rot.rotation_difference(Quaternion((rotation[3], *rotation[:3]))) for frame, rotation in curve.rotationFrames.items()}
