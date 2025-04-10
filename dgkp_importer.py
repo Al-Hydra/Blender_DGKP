@@ -298,7 +298,7 @@ def import_dgkp(filePath, materialspath):
             for vertex in mdl.vertices:
                 vert = bm.verts.new(vertex.position)
 
-                custom_normals.append(vertex.normal)
+                custom_normals.append(Vector(vertex.normal).normalized())
                 vert[vgroup_layer][vertex.boneIDs[0]] = 0
                 vert[vgroup_layer][vertex.boneIDs[1]] = 0
                 vert[vgroup_layer][vertex.boneIDs[2]] = 0
