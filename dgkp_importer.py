@@ -16,17 +16,18 @@ class DGKP_IMPORTER_OT_IMPORT(bpy.types.Operator, ImportHelper):
     files: CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN', 'SKIP_SAVE'}) # type: ignore
     directory: StringProperty(subtype='DIR_PATH', options={'HIDDEN', 'SKIP_SAVE'}) # type: ignore
     filepath: StringProperty(subtype='FILE_PATH') # type: ignore
-    materialspath: StringProperty(name= "Materials Path",subtype='FILE_PATH') # type: ignore
 
 
     def execute(self, context):
 
         start_time = perf_counter()
+        addon_prefs = bpy.context.preferences.addons[__package__].preferences
+        materials_path = addon_prefs.materials_path
 
         for file in self.files:
             
             self.filepath = os.path.join(self.directory, file.name)
-            import_dgkp(self.filepath, self.materialspath)
+            import_dgkp(self.filepath, materials_path)
         
         elapsed_s = "{:.2f}s".format(perf_counter() - start_time)
         self.report({'INFO'}, "DGKP archives imported in " + elapsed_s)
@@ -42,17 +43,19 @@ class DGKP_IMPORTER_OT_DROP(bpy.types.Operator):
     files: CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN', 'SKIP_SAVE'}) # type: ignore
     directory: StringProperty(subtype='DIR_PATH', options={'HIDDEN', 'SKIP_SAVE'}) # type: ignore
     filepath: StringProperty(subtype='FILE_PATH') # type: ignore
-    materialspath: StringProperty(subtype='FILE_PATH') # type: ignore
 
 
     def execute(self, context):
 
         start_time = perf_counter()
-
+        
+        addon_prefs = bpy.context.preferences.addons[__package__].preferences
+        materials_path = addon_prefs.materials_path
+        
         for file in self.files:
             
             self.filepath = os.path.join(self.directory, file.name)
-            import_dgkp(self.filepath, self.materialspath)
+            import_dgkp(self.filepath, materials_path)
         
         elapsed_s = "{:.2f}s".format(perf_counter() - start_time)
         self.report({'INFO'}, "DGKP archives imported in " + elapsed_s)
@@ -81,63 +84,151 @@ def import_dgkp(filePath, materialspath):
     else:
         materialsDGKP = DGKP()
 
+    up_matrix = Matrix.Rotation(radians(90), 4, 'X')
 
     def add_material(material, material_name):
 
-        # Create a new material
-        if material:
-            blender_material = bpy.data.materials.get(material.name)
-            if not blender_material:
-                blender_material = bpy.data.materials.new(material.name)
-                blender_material.use_nodes = True
-                nodes = blender_material.node_tree.nodes
-                nodes.clear()
-
-                # Create Image Texture Node
-                image_texture_node = nodes.new(type='ShaderNodeTexImage')
-                image_texture_node.image = bpy.data.images.get(material.textures[0])
-                image_texture_node.location = (-400, 0)
-
-                # Create Color Mix Node (set to Multiply)
-                color_mix_node = nodes.new(type='ShaderNodeMixRGB')
-                color_mix_node.blend_type = 'MULTIPLY'
-                color_mix_node.inputs['Fac'].default_value = 1.0
-                color_mix_node.location = (-200, 0)
-
-                # Create Material Output Node
-                output_node = nodes.new(type='ShaderNodeOutputMaterial')
-                output_node.location = (200, 0)
-
-                # Connect Image Texture Node output to Color Mix Node inputs
-                blender_material.node_tree.links.new(image_texture_node.outputs['Color'], color_mix_node.inputs['Color1'])
-                blender_material.node_tree.links.new(image_texture_node.outputs['Alpha'], color_mix_node.inputs['Color2'])
-
-                # Connect Color Mix Node output to Material Output Node
-                blender_material.node_tree.links.new(color_mix_node.outputs['Color'], output_node.inputs['Surface'])
-            
-           
-        else:
+        # Check if the material already exists
+        blender_material = bpy.data.materials.get(material_name)
+        if not blender_material:
             blender_material = bpy.data.materials.new(material_name)
-        
+            blender_material.use_nodes = True
+
+            # Clear default nodes
+            nodes = blender_material.node_tree.nodes
+            links = blender_material.node_tree.links
+            nodes.clear()
+
+            # Create nodes
+            tex_node = nodes.new("ShaderNodeTexImage")
+            tex_node.image = bpy.data.images.get(material.textures[0]) if material else None
+            tex_node.location = (-800, 0)
+
+            rgb_curves = nodes.new("ShaderNodeRGBCurve")
+            rgb_curves.location = (-600, 0)
+
+            # Set a similar curve (example curve)
+            curve = rgb_curves.mapping.curves[3]  # Use the 'C' channel
+            curve.points.new(0.91, 0.57)
+            rgb_curves.mapping.update()
+
+            color_attr = nodes.new("ShaderNodeVertexColor")
+            color_attr.location = (-1000, -300)
+
+            gamma_attr = nodes.new("ShaderNodeGamma")
+            gamma_attr.inputs[1].default_value = 0.455
+            gamma_attr.location = (-800, -300)
+
+            separate = nodes.new("ShaderNodeSeparateColor")
+            separate.location = (-600, -300)
+
+            attr_muladd = nodes.new("ShaderNodeMath")
+            attr_muladd.operation = 'MULTIPLY_ADD'
+            attr_muladd.inputs[1].default_value = 2.0
+            attr_muladd.inputs[2].default_value = -1.0
+            attr_muladd.use_clamp = True
+            attr_muladd.location = (-400, -300)
+
+            diffuse = nodes.new("ShaderNodeBsdfDiffuse")
+            diffuse.inputs['Roughness'].default_value = 0.0
+            diffuse.location = (-1000, 200)
+
+            shader_to_rgb = nodes.new("ShaderNodeShaderToRGB")
+            shader_to_rgb.location = (-800, 200)
+
+            gamma = nodes.new("ShaderNodeGamma")
+            gamma.inputs[1].default_value = 0.5
+            gamma.location = (-600, 200)
+
+            lighting_muladd = nodes.new("ShaderNodeMath")
+            lighting_muladd.operation = 'MULTIPLY_ADD'
+            lighting_muladd.inputs[1].default_value = 2.0
+            lighting_muladd.inputs[2].default_value = -0.5
+            lighting_muladd.use_clamp = True
+            lighting_muladd.location = (-400, 200)
+
+            combined = nodes.new("ShaderNodeMath")
+            combined.operation = 'MULTIPLY'
+            combined.use_clamp = True
+            combined.location = (-200, 200)
+
+            final_mask = nodes.new("ShaderNodeMath")
+            final_mask.operation = 'MULTIPLY_ADD'
+            final_mask.inputs[1].default_value = 0.5
+            final_mask.inputs[2].default_value = 0.5
+            final_mask.use_clamp = True
+            final_mask.location = (0, 200)
+
+            greater_than = nodes.new("ShaderNodeMath")
+            greater_than.operation = 'GREATER_THAN'
+            greater_than.inputs[1].default_value = 0.5
+            greater_than.use_clamp = True
+            greater_than.location = (200, 200)
+
+            mix_rgb = nodes.new("ShaderNodeMixRGB")
+            mix_rgb.blend_type = 'MIX'
+            mix_rgb.inputs['Fac'].default_value = 1.0
+            mix_rgb.use_clamp = True
+            mix_rgb.location = (400, 100)
+
+            multiply_final = nodes.new("ShaderNodeMixRGB")
+            multiply_final.blend_type = 'MULTIPLY'
+            multiply_final.inputs['Fac'].default_value = 1.0
+            multiply_final.location = (600, 100)
+
+            output = nodes.new("ShaderNodeOutputMaterial")
+            output.location = (800, 100)
+
+            # Link nodes
+            links.new(tex_node.outputs['Color'], rgb_curves.inputs['Color'])
+            links.new(color_attr.outputs['Color'], gamma_attr.inputs['Color'])
+            links.new(gamma_attr.outputs['Color'], separate.inputs['Color'])
+            links.new(separate.outputs['Red'], attr_muladd.inputs[0])
+
+            links.new(diffuse.outputs['BSDF'], shader_to_rgb.inputs['Shader'])
+            links.new(shader_to_rgb.outputs['Color'], gamma.inputs['Color'])
+            links.new(gamma.outputs['Color'], lighting_muladd.inputs[0])
+            links.new(lighting_muladd.outputs[0], combined.inputs[0])
+            links.new(attr_muladd.outputs[0], combined.inputs[1])
+            links.new(combined.outputs[0], final_mask.inputs[0])
+            links.new(final_mask.outputs[0], greater_than.inputs[0])
+            links.new(greater_than.outputs[0], mix_rgb.inputs['Fac'])
+
+            links.new(rgb_curves.outputs['Color'], mix_rgb.inputs[1])
+            links.new(tex_node.outputs['Color'], mix_rgb.inputs[2])
+
+            links.new(mix_rgb.outputs['Color'], multiply_final.inputs['Color1'])
+            links.new(tex_node.outputs['Alpha'], multiply_final.inputs['Color2'])
+
+            links.new(multiply_final.outputs['Color'], output.inputs['Surface'])
+
         return blender_material
-        
 
 
-    def add_bones(bone, armature):
+    def add_bones(bone, armature, up_matrix):
         bbone = armature.edit_bones.new(bone.name)
         bbone.use_deform = True
-        bbone.tail = Vector((0, 0.1, 0))
-        
+
         rotation = Quaternion((bone.rotation[3], bone.rotation[0], bone.rotation[1], bone.rotation[2]))
-        matrix = Matrix.LocRotScale(bone.position, rotation, bone.scale)
-        
-        bbone["loc"] = bone.position
-        bbone["rotation"] = rotation
-        bbone["scale"] = bone.scale
-        bbone["matrix"] = matrix
-        
-        bbone.matrix = matrix
-        
+        transform = Matrix.LocRotScale(bone.position, rotation, bone.scale)
+
+        # Apply up_matrix to the transform
+        final_matrix = up_matrix @ transform
+
+        # Set head and tail positions directly
+        bbone.head = final_matrix.translation
+
+        # Calculate tail position a small distance along the Y axis of the bone
+        tail_offset = final_matrix @ Vector((0, 0.1, 0)) - final_matrix.translation
+        bbone.tail = bbone.head + tail_offset
+
+        # Use up_matrix-transformed direction to set roll
+        bbone.align_roll((final_matrix @ Vector((0, 0, 1)) - bbone.head).normalized())
+
+        # Store debug data
+        bbone["orig_matrix"] = transform
+        bbone["final_matrix"] = final_matrix
+
         return bbone
 
 
@@ -153,6 +244,7 @@ def import_dgkp(filePath, materialspath):
 
     if dgkp.models:
         
+        
         for mdl in dgkp.models:
 
             armature = bpy.data.armatures.new(mdl.name)
@@ -165,7 +257,7 @@ def import_dgkp(filePath, materialspath):
             bpy.context.view_layer.objects.active = armature_obj
             bpy.ops.object.editmode_toggle()
             
-            bones = [add_bones(bone, armature) for bone in mdl.bones]
+            bones = [add_bones(bone, armature, up_matrix) for bone in mdl.bones]
             
             
 
@@ -239,6 +331,7 @@ def import_dgkp(filePath, materialspath):
             bm.to_mesh(meshdata)
 
             meshdata.normals_split_custom_set_from_vertices(custom_normals)
+            meshdata.transform(up_matrix)
 
             #set active color
             mesh_obj.data.color_attributes.render_color_index = 0
@@ -284,9 +377,9 @@ def import_dgkp(filePath, materialspath):
                 
                 bbone = target_armature.data.bones.get(bones[curve.index])
                 if bbone.parent:
-                    matrix = Matrix(bbone.parent["matrix"]).inverted() @ Matrix(bbone["matrix"])
+                    matrix = Matrix(bbone.parent["orig_matrix"]).inverted() @ Matrix(bbone["orig_matrix"])
                 else:
-                    matrix = Matrix(bbone["matrix"])
+                    matrix = Matrix(bbone["orig_matrix"])
 
                 loc, rot, scale = matrix.decompose()
 
@@ -303,57 +396,59 @@ def import_dgkp(filePath, materialspath):
                 data_path = f'{bone_path}.{"scale"}' 
                 insertFrames(action, group_name, data_path, curve.scaleFrames, 3)
 
+
+        # convert the rotation part of the up_matrix to a quaternion
+        up_quat = up_matrix.to_quaternion()
+        flip_quat = Quaternion((1.0, 0.0, 0.0), radians(180))
+        camera_up_quat = up_quat @ flip_quat
+
         if anim.cameraAnimation:
             camAnim = anim.cameraAnimation
 
-            #set fps to 30
             bpy.context.scene.render.fps = 60
-
-            #adjust the timeline
             bpy.context.scene.frame_start = 0
             bpy.context.scene.frame_end = camAnim.frameCount
-            
+
             camera_obj = bpy.context.scene.camera
             if not camera_obj:
                 camera = bpy.data.cameras.new("Camera")
                 camera_obj = bpy.data.objects.new("Camera", camera)
-                bpy.context.collection.objects.link(bpy.data.objects.get(camera_obj.name))
-
+                bpy.context.collection.objects.link(camera_obj)
                 bpy.context.scene.camera = camera_obj
-            
-            
-            #create a separate action for each camera
-            camera_action = bpy.data.actions.new(f"{camAnim.name} ({camera_obj.name})")
 
-            group_name = camera_action.groups.new(name = camera_obj.name).name
-            
-            #apply the animation to the camera
+            camera_action = bpy.data.actions.new(f"{camAnim.name} ({camera_obj.name})")
+            group_name = camera_action.groups.new(name=camera_obj.name).name
+
             camera_obj.animation_data_create()
             camera_obj.animation_data.action = camera_action
-            camera_obj.scale = (10,10,10)
+            camera_obj.scale = (10, 10, 10)
             camera_obj.data.lens = camera_obj.data.sensor_width / (2 * tan(radians(camAnim.FoV) / 2))
 
             locations = {}
             rotations = {}
             fovs = {}
+
             for frame, values in camAnim.frames.items():
                 loc, rot, scale, fov = values
-                rot = list(rot)
-                rot[0] -= 180
-                locations[frame] = Vector(loc)
-                rotation = [radians(r) for r in rot]
-                
-                rotations[frame] = rotation
-                #fovs[frame] = [camera_obj.data.sensor_width / (2 * tan(radians(fov) / 2))]
 
-            data_path = f'{"location"}'
-            insertFrames(camera_action, group_name, data_path, locations, 3)
-            
-            data_path = f'{"rotation_euler"}'
-            insertFrames(camera_action, group_name, data_path, rotations, 3)
-            
-            #data_path = f'{"data.lens"}'
-            #insertFrames(camera_action, group_name, data_path, fovs, 1)
+                # Apply up_matrix to location
+                loc = Vector(loc)
+                loc.rotate(up_quat)
+
+                rot_rad = [radians(r) for r in rot]
+                euler_rot = Euler(rot_rad, 'XYZ')
+                euler_rot.rotate(camera_up_quat)
+                euler_rot[2] = -euler_rot[2]
+
+                locations[frame] = loc
+                rotations[frame] = euler_rot
+                fov_rad = radians(fov)
+                fovs[frame] = [camera_obj.data.sensor_width / (2 * tan(fov_rad / 2))]
+
+            insertFrames(camera_action, group_name, "location", locations, 3)
+            insertFrames(camera_action, group_name, "rotation_euler", rotations, 3)
+            insertFrames(camera_action, group_name, "data.lens", fovs, 1)
+
 
         
 
