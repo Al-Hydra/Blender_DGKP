@@ -9,3 +9,5 @@ lib/__pycache__/dgkp.cpython-312.pyc
 dgkp_settings.json
 snp_dumper.py
 *lib/__pycache__
+*.pyc
+/lib/__pycache__

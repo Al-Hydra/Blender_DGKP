@@ -19,6 +19,7 @@ class DGKP(BrStruct):
         self.textures = []
         self.models = []
         self.animations = []
+        self.lists = []
         self.materials = {}
         self.allFiles = {}
 
@@ -43,6 +44,10 @@ class DGKP(BrStruct):
                 file = modelBuffer.read_struct(MDLD)
                 file.name = fileName
                 self.models.append(file)
+            elif fileType == "LIST":
+                listBuffer = BinaryReader(fileData, Endian.LITTLE, "cp932")
+                file = listBuffer.read_struct(RBLF)
+                self.lists.append(file)
             elif fileType == "ANUM":
                 anmBuffer = BinaryReader(fileData, Endian.LITTLE, "cp932")
                 file = anmBuffer.read_struct(ANUM)
@@ -444,7 +449,7 @@ class CAMF(BrStruct):
         framesOffset = br.read_uint32()
         self.frameCount = br.read_uint16()
         self.frameRate = br.read_uint16()
-        self.FoV = br.read_float()
+        self.defaultFoV = br.read_float()
 
         self.frames = {}
 
@@ -462,7 +467,89 @@ class CAMF(BrStruct):
             self.frames[frame] = (location, rotation, scale, fov)
 
         br.seek(pos)
+
+
+class RBLF(BrStruct):
+    def __init__(self) -> None:
+        self.name = "scene"
+        self.type = "RBLF"
+        self.objects = []
+        self.objectGroups = []
+    
+    def __br_read__(self, br: BinaryReader):
+        self.magic = br.read_str(4)
+        self.version = br.read_uint32()
+        self.unk = br.read_uint32()
+        self.unk2 = br.read_uint32()
+        self.objCount = br.read_uint32()
+        self.objOffset = br.read_uint32()
+        self.objGroupsCount = br.read_uint32()
+        self.objGroupsOffset = br.read_uint32()
+        self.count3 = br.read_uint32()
+        self.offset3 = br.read_uint32()
+        br.seek(self.objOffset)
+        self.objects = br.read_struct(RBLF_Object, self.objCount)
         
+        br.seek(self.objGroupsOffset)
+        self.objectGroups = br.read_struct(RBLF_ObjectGroup, self.objGroupsCount)
+
+class RBLF_Object(BrStruct):
+    def __init__(self) -> None:
+        self.name = ""
+        self.location = [0, 0, 0]
+        self.rotation = [0, 0, 0, 0]
+        self.scale = [0, 0, 0]
+        self.unk = 0
+        self.flags = 0
+    
+    def __br_read__(self, br: BinaryReader):
+        self.name = br.read_str(64)
+        self.location = br.read_float(3)
+        self.rotation = br.read_float(4)
+        self.scale = br.read_float(3)
+        self.unk = br.read_int32()
+        self.flags = br.read_uint32()
+    
+    def __br_write__(self, br: BinaryReader):
+        br.write_str_fixed(self.name, 64)
+        br.write_float(self.location)
+        br.write_float(self.rotation)
+        br.write_float(self.scale)
+        br.write_int32(self.unk)
+        br.write_uint32(self.flags)
+
+
+class RBLF_ObjectGroup(BrStruct):
+    def __init__(self) -> None:
+        self.min = [0, 0, 0, 0]
+        self.max = [0, 0, 0, 0]
+        self.objectCount = 0
+        self.objectIndexOffset = 0
+        self.unk2 = 0
+        self.unk3 = 0
+        self.objectIndices = []
+    
+    def __br_read__(self, br: BinaryReader):
+        self.min = br.read_float(4)
+        self.max = br.read_float(4)
+        self.objectCount = br.read_uint32()
+        self.objectIndexOffset = br.read_uint32()
+        self.unk2 = br.read_uint32()
+        self.unk3 = br.read_uint32()
+
+        pos = br.pos()
+        br.seek(self.objectIndexOffset)
+        self.objectIndices = br.read_uint32(self.objectCount)
+        br.seek(pos)
+    
+    def __br_write__(self, br: BinaryReader):
+        br.write_float(self.min)
+        br.write_float(self.max)
+        br.write_uint32(self.objectCount)
+        self.objectIndexOffsetPos = br.pos()
+        br.write_int32(0) #offset will be rewritten later
+        br.write_uint32(self.unk2)
+        br.write_uint32(self.unk3)
 
 
 def read_dgkp(path):

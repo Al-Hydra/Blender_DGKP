@@ -67,7 +67,7 @@ class DGKP_FH_IMPORT(bpy.types.FileHandler):
     bl_idname = "DGKP_FH_import"
     bl_label = "File handler for DGKP archives"
     bl_import_operator = "import_scene.drop_dgkp"
-    bl_file_extensions = ".pac"
+    bl_file_extensions = ".pac;.lev"
 
     @classmethod
     def poll_drop(cls, context):
@@ -101,7 +101,7 @@ def import_dgkp(filePath, materialspath):
 
             # Create nodes
             tex_node = nodes.new("ShaderNodeTexImage")
-            tex_node.image = bpy.data.images.get(material.textures[0]) if material else None
+            tex_node.image = bpy.data.images.get(material.textures[0]) if material and material.textures else None
             tex_node.location = (-800, 0)
 
             rgb_curves = nodes.new("ShaderNodeRGBCurve")
@@ -338,16 +338,49 @@ def import_dgkp(filePath, materialspath):
             mesh_obj.data.color_attributes.active_color_index = 0
 
             bpy.context.collection.objects.link(mesh_obj)
+    
+    if dgkp.lists:
+        for lst in dgkp.lists:
+            lst: RBLF
+            
+            for instancedObj in lst.objects:
+                instancedObj: RBLF_Object
+                
+                #search for the object in the scene
+                obj = bpy.data.objects.get(instancedObj.name + ".mdl")  # Remove .mdl
+                if obj:
+                    #construct a matrix from the instanced object
+                    obj_matrix = Matrix.LocRotScale(
+                        Vector((instancedObj.location[0], -instancedObj.location[2], instancedObj.location[1])),
+                        Quaternion((instancedObj.rotation[3], instancedObj.rotation[0], instancedObj.rotation[2], instancedObj.rotation[1])),
+                        Vector(instancedObj.scale)
+                    )
 
+                    #hide the original object and its children
+                    obj.hide_set(True)
+                    for child in obj.children:
+                        child.hide_set(True)
+                    
+                    # create an instance of the object and its children
+                    instance_obj = obj.copy()
+                    instance_obj.data = obj.data
+                    bpy.context.collection.objects.link(instance_obj)
+                    instance_obj.matrix_world = obj_matrix
+                    for child in obj.children:
+                        child_instance = child.copy()
+                        child_instance.data = child.data
+                        
+                        child_instance.parent = instance_obj
+                        bpy.context.collection.objects.link(child_instance)
 
     def insertFrames(action, group_name, data_path, values, values_count):
-            if len(values):
-                for i in range(values_count):
-                    fc = action.fcurves.new(data_path=data_path, index=i, action_group=group_name)
-                    fc.keyframe_points.add(len(values.keys()))
-                    fc.keyframe_points.foreach_set('co', [x for co in list(map(lambda f, v: (f, v[i]), values.keys(), values.values())) for x in co])
+        if len(values):
+            for i in range(values_count):
+                fc = action.fcurves.new(data_path=data_path, index=i, action_group=group_name)
+                fc.keyframe_points.add(len(values.keys()))
+                fc.keyframe_points.foreach_set('co', [x for co in list(map(lambda f, v: (f, v[i]), values.keys(), values.values())) for x in co])
 
-                    fc.update()
+                fc.update()
 
     for anim in dgkp.animations:
         anim: ANUM
@@ -370,6 +403,8 @@ def import_dgkp(filePath, materialspath):
 
             bones = sorted([b.name for b in target_armature.pose.bones])
 
+            up_quat = up_matrix.to_quaternion()
+            
             for curve in sklAnim.curves:
                 curve: TOMF_Curve
                 group_name = action.groups.new(name = bones[curve.index]).name
@@ -382,6 +417,9 @@ def import_dgkp(filePath, materialspath):
                     matrix = Matrix(bbone["orig_matrix"])
 
                 loc, rot, scale = matrix.decompose()
+                
+                #rot.invert()
+                #rot = Quaternion((rot[0], -rot[1], rot[2], -rot[3]))
 
                 data_path = f'{bone_path}.{"location"}'
                 locations = {f: Vector((location)) - (loc) for f, location in curve.locationFrames.items()}
@@ -390,11 +428,15 @@ def import_dgkp(filePath, materialspath):
 
                 data_path = f'{bone_path}.{"rotation_quaternion"}'
                 rotations = {frame : rot.rotation_difference(Quaternion((rotation[3], *rotation[:3]))) for frame, rotation in curve.rotationFrames.items()}
+                #rotations = {frame : Quaternion((-r[3], -r[0], -r[1], -r[2]))  @ rot for frame, r in curve.rotationFrames.items()}
 
                 insertFrames(action, group_name, data_path, rotations, 4)
 
                 data_path = f'{bone_path}.{"scale"}' 
-                insertFrames(action, group_name, data_path, curve.scaleFrames, 3)
+                scales = {frame: Vector([s / b for s, b in zip(value, scale)]) for frame, value in curve.scaleFrames.items()}
+                insertFrames(action, group_name, data_path, scales, 3)
+                
+                #insertFrames(action, group_name, data_path, curve.scaleFrames, 3)
 
 
         # convert the rotation part of the up_matrix to a quaternion
@@ -422,7 +464,7 @@ def import_dgkp(filePath, materialspath):
             camera_obj.animation_data_create()
             camera_obj.animation_data.action = camera_action
             camera_obj.scale = (10, 10, 10)
-            camera_obj.data.lens = camera_obj.data.sensor_width / (2 * tan(radians(camAnim.FoV) / 2))
+            camera_obj.data.lens = camera_obj.data.sensor_width / (2 * tan(radians(camAnim.defaultFoV) / 2))
 
             locations = {}
             rotations = {}
@@ -442,7 +484,7 @@ def import_dgkp(filePath, materialspath):
 
                 locations[frame] = loc
                 rotations[frame] = euler_rot
-                fov_rad = radians(fov)
+                fov_rad = radians(camAnim.defaultFoV + fov)
                 fovs[frame] = [camera_obj.data.sensor_width / (2 * tan(fov_rad / 2))]
 
             insertFrames(camera_action, group_name, "location", locations, 3)
